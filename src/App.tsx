@@ -8,10 +8,14 @@ import { ROUTER_ADDRESSES } from './constants/addresses';
 import { ERC20BridgeSource } from './helpers/0x';
 import ROUTER_ABI from './constants/abis/router-abi.json';
 import getQuote from './utils/getQuote';
-import getSignedTransaction, { SwapDataArr } from './utils/getSignedTransaction';
+import { getSignedTransaction, SwapDataArr } from './utils/getSignedTransaction';
+import estimateGas from './utils/estimateGas';
+import sendTransaction from './utils/sendTransaction';
 
-const eth = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
-const mist = '0x88acdd2a6425c3faae4bc9650fd7e27e0bebb7ab'
+const eth = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+const mist = '0x88acdd2a6425c3faae4bc9650fd7e27e0bebb7ab';
+const usdc = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
+const defaultSellAmountInput = '.01';
 
 function App() {
   const [account, setAccount] = useState<string | undefined>();
@@ -21,34 +25,49 @@ function App() {
   const [blockNumber, setBlockNumber] = useState<number | undefined>();
   const [baseFee, setBaseFee] = useState<BigNumber | undefined>();
   const [priorityFee, setPriorityFee] = useState<BigNumber | undefined>();
+  const [error, setError] = useState<any | undefined>();
+  const [sellAmount, setSellAmount] = useState(defaultSellAmountInput);
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState('');
 
   async function connect() {
     if (!window.ethereum) return;
     try {
-      // window.web3 = new Web3(window.ethereum as any);
       await window.ethereum?.request?.({method: 'eth_requestAccounts'});
     } catch(err) {
       if (err.code === 4001) {
         // EIP-1193 userRejectedRequest error
         // If this happens, the user rejected the connection request.
         console.log('Please connect to Wallet.');
+        throw new Error('Please connect wallet.')
       } else {
         console.error(err);
+        // throw new Error('Error connecting wallet. refresh to try again')
       }
     }
   }
 
   async function loadWeb3() {
     if (window.ethereum) {
-      await connect();
+      setError(undefined);
+      try {
+        await connect();
+      } catch (e) {
+        setError(e);
+        return;
+      }
 
       const currentProvider = new Web3Provider(window.ethereum as ExternalProvider);
       
       setLibrary(currentProvider)
       listenToBlocks(currentProvider)
 
-      await loadBlockchainData(currentProvider);
-      await updateFees(currentProvider);
+      try  {
+        await loadBlockchainData(currentProvider);
+        await updateFees(currentProvider);
+      } catch(e) {
+        setError(e.message)
+      }
     } else {
       window.alert('Non-Ethereum browser detected.');
     }
@@ -93,48 +112,40 @@ function App() {
   }
 
   async function handleSendTransaction() {
+    setError(undefined)
+    setLoading(false)
     if (!contract || !chainId || !library || !account || !baseFee || !priorityFee) return;
-
-    const quote = await getQuote(eth, mist, parseEther('.01').toString(), [ERC20BridgeSource.UniswapV2]);
-    const sellAmount = BigNumber.from(quote.sellAmount).toHexString()
-    const feeAmount = parseUnits('0', 17).toHexString() // .0 ETH
-    const calldata = quote.data;
-    const feeToken = eth;
-    const inputToken = quote.sellTokenAddress;
-    const outputToken = quote.buyTokenAddress;
-    const value = feeAmount;
-
-    const maxBaseFeePerGas = baseFee;
-    const maxPriorityFeePerGas = priorityFee;
-
-    const methodName = 'proxiedSwap';
-    const args = [
-      calldata,
-      feeToken,
-      inputToken,
-      sellAmount,
-      outputToken,
-      feeAmount,
-    ] as SwapDataArr;
-
+    
     try {
-      const signedTx = await getSignedTransaction(
+      const quote = await getQuote(eth, usdc, parseEther('.01').toString(), [ERC20BridgeSource.UniswapV2]);
+      const sellAmount = BigNumber.from(quote.sellAmount).toHexString()
+      const feeAmount = parseUnits('0', 17).toHexString() // .0 ETH
+      const calldata = quote.data;
+      const feeToken = eth;
+      const inputToken = quote.sellTokenAddress;
+      const outputToken = quote.buyTokenAddress;
+      const value = BigNumber.from(feeAmount).add(sellAmount).toHexString();
+
+      setLoading(true);
+      sendTransaction({
         contract,
-        methodName,
-        args,
-        value,
-        maxBaseFeePerGas,
-        maxPriorityFeePerGas,
-        BigNumber.from(375000),
         chainId,
         library,
         account,
-      )
-
-      console.log('successfully signed tx', signedTx);
+        maxBaseFeePerGas: baseFee,
+        maxPriorityFeePerGas: priorityFee,
+        calldata,
+        feeToken,
+        inputToken,
+        sellAmount,
+        outputToken,
+        feeAmount,
+        value
+      });
     } catch(e) {
-      console.log('error signing tx', e.message)
+      setError(e)
     }
+    setLoading(false);
   }
 
   useEffect(() => {
@@ -144,7 +155,18 @@ function App() {
   return (
     <div className="App">
       <header className="App-header">
-        <button className="button" onClick={handleSendTransaction} type="submit">Submit ETH:MIST Transaction</button>
+        amount in eth.
+        <input className="input" onChange={(e:any) => setSellAmount(e.target.value)} value={sellAmount} />
+        <button className="button" disabled={loading} onClick={handleSendTransaction} type="submit">Submit ETH:USDC Transaction</button>
+        {loading &&
+          <div>loading</div>
+        }
+        {error &&
+          <div className="error">{error.message}</div>
+        }
+        {success &&
+          <div className="success">{success}</div>
+        }
       </header>
     </div>
   );

@@ -17,7 +17,19 @@
   color: #61dafb;
 }
 
+.input {
+  border-radius: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+}
+
 .button {
   border-radius: 1rem;
   padding: 1rem 3rem;
+}
+
+.error {
+  color: red;
+  font-size: 1rem;
+  margin-top: 1rem;
 }

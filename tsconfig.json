@@ -22,7 +22,7 @@
     "isolatedModules": true,
     "downlevelIteration": true,
     "allowSyntheticDefaultImports": true,
-    "types": [],
+    "types": ["jest"],
     "jsx": "preserve",
     "incremental": true
   },

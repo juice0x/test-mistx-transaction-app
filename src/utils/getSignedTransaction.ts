@@ -13,7 +13,7 @@ interface SignedTransactionResponse {
   tx: any;
 }
 
-export default async function getSignedTransaction(
+export async function getSignedTransaction(
   contract: Contract,
   methodName: string,
   args: SwapDataArr,
@@ -23,7 +23,7 @@ export default async function getSignedTransaction(
   gasLimit: BigNumber,
   chainId: number,
   library: Web3Provider,
-  account: string
+  account: string,
 ) {
   if (!(contract.signer instanceof JsonRpcSigner)) {
     throw new Error(`Cannot sign transactions with this wallet type`);
@@ -60,44 +60,15 @@ export default async function getSignedTransaction(
   //delete for serialize necessary
   populatedTx.chainId = chainId;
   // HANDLE METAMASK
-  // MetaMask does not support eth_signTransaction so we must use eth_sign as a workaround.
+  // MetaMask does not support eth_signTransaction so we need to use eth_sign as a workaround.
   // For other wallets, use eth_signTransaction
   let signedTx: string;
 
   try {
     if (isMetamask && !isBrave()) {
-      delete populatedTx.from;
-      const serialized = serializeTransaction(populatedTx);
-      const hash = keccak256(serialized);
-      const signature: SignatureLike = await library.jsonRpcFetchFunc(
-        'eth_sign',
-        [account, hash]
-      );
-      // console.log('signature', signature)
-      // this returns the transaction & signature serialized and ready to broadcast
-      // basically does everything that AD does with hexlify etc. - kek
-      signedTx = serializeTransaction(populatedTx, signature);
+      signedTx =  await ethSign(library, populatedTx, account)
     } else {
-      const payload = [
-        {
-          ...populatedTx,
-          chainId: undefined,
-          gas: `0x${populatedTx.gasLimit?.toNumber().toString(16)}`,
-          gasLimit: `0x${populatedTx.gasLimit?.toNumber().toString(16)}`,
-          maxFeePerGas: `0x${populatedTx.maxFeePerGas
-            ?.toNumber()
-            .toString(16)}`,
-          maxPriorityFeePerGas: `0x${populatedTx.maxPriorityFeePerGas
-            ?.toNumber()
-            .toString(16)}`,
-          nonce: `0x${populatedTx.nonce?.toString(16)}`,
-          ...(value && !isZero(value) ? { value } : { value: '0x0' }),
-        },
-      ];
-      const signedTxRes: SignedTransactionResponse =
-        await library.jsonRpcFetchFunc('eth_signTransaction', payload);
-
-      signedTx = signedTxRes.raw;
+      signedTx = await ethSignTransaction(library, populatedTx, value)
     }
 
     // Set isMetaMask again after signing. (workaround for an issue with isMetaMask set on the provider during signing)
@@ -111,6 +82,43 @@ export default async function getSignedTransaction(
     if (web3Provider && isMetamask) {
       web3Provider.provider.isMetaMask = isMetamask;
     }
-    return Promise.reject(e);
+    throw new Error(e.message);
   }
+}
+
+export async function ethSign(library: Web3Provider, populatedTx: PopulatedTransaction, account: string) {
+  delete populatedTx.from;
+  const serialized = serializeTransaction(populatedTx);
+  const hash = keccak256(serialized);
+  const signature: SignatureLike = await library.jsonRpcFetchFunc(
+    'eth_sign',
+    [account, hash]
+  );
+  // console.log('signature', signature)
+  // this returns the transaction & signature serialized and ready to broadcast
+  // basically does everything that AD does with hexlify etc. - kek
+  return serializeTransaction(populatedTx, signature);
+}
+
+export async function ethSignTransaction(library: Web3Provider, populatedTx: PopulatedTransaction, value: string) {
+  const payload = [
+    {
+      ...populatedTx,
+      chainId: undefined,
+      gas: `0x${populatedTx.gasLimit?.toNumber().toString(16)}`,
+      gasLimit: `0x${populatedTx.gasLimit?.toNumber().toString(16)}`,
+      maxFeePerGas: `0x${populatedTx.maxFeePerGas
+        ?.toNumber()
+        .toString(16)}`,
+      maxPriorityFeePerGas: `0x${populatedTx.maxPriorityFeePerGas
+        ?.toNumber()
+        .toString(16)}`,
+      nonce: `0x${populatedTx.nonce?.toString(16)}`,
+      ...(value && !isZero(value) ? { value } : { value: '0x0' }),
+    },
+  ];
+  const signedTxRes: SignedTransactionResponse =
+    await library.jsonRpcFetchFunc('eth_signTransaction', payload);
+
+  return signedTxRes.raw;
 }
